@@ -117,6 +117,49 @@ function varianceTone(type) {
   return "alert";
 }
 
+// Derives live notifications from current data — no separate storage needed,
+// so they're always accurate to what's actually in the tanks right now.
+const LOW_STOCK_PCT = 15; // flag when remaining stock drops below this % of what was purchased
+
+function getNotifications(data) {
+  const notifications = [];
+  const active = data.tanks.filter((t) => t.status === "ACTIVE");
+  const closed = data.tanks.filter((t) => t.status === "CLOSED");
+
+  active.forEach((t) => {
+    const m = tankMetrics(t);
+    if (m.totalPurchasedKg > 0) {
+      const pct = (m.remainingStock / m.totalPurchasedKg) * 100;
+      if (pct <= LOW_STOCK_PCT) {
+        notifications.push({
+          id: `lowstock-${t.id}`, tone: pct <= 5 ? "alert" : "warn", icon: Fuel,
+          title: "Low Stock", message: `${t.tankNo} has ${kgFmt(m.remainingStock)} left (${Math.round(pct)}% remaining)`,
+          date: todayStr(),
+        });
+      }
+    }
+  });
+
+  closed.filter((t) => t.closure && t.closure.varianceType !== "Normal").forEach((t) => {
+    notifications.push({
+      id: `variance-${t.id}`, tone: varianceTone(t.closure.varianceType), icon: AlertTriangle,
+      title: t.closure.varianceType, message: `${t.tankNo}: ${kgFmt(Math.abs(t.closure.variance))} ${t.closure.variance < 0 ? "shortage" : "overage"} at closure`,
+      date: t.endDate || todayStr(),
+    });
+  });
+
+  const pendingFreeIssues = data.tanks.flatMap((t) => t.internalUsage.filter((u) => u.type === "Free Issue" && !u.approvedBy));
+  if (pendingFreeIssues.length > 0) {
+    notifications.push({
+      id: "free-issues-pending", tone: "warn", icon: PackageMinus,
+      title: "Free Issues Awaiting Approval", message: `${pendingFreeIssues.length} free issue${pendingFreeIssues.length === 1 ? "" : "s"} logged without an approver`,
+      date: todayStr(),
+    });
+  }
+
+  return notifications.sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
 /* ---------------------------------------------------------------------- */
 /* UI primitives                                                           */
 /* ---------------------------------------------------------------------- */
@@ -376,6 +419,22 @@ function QuickAction({ icon: Icon, label, tone = "primary", onClick }) {
   );
 }
 
+function NotificationBell({ data, goto }) {
+  const count = getNotifications(data).length;
+  return (
+    <button onClick={() => goto("notifications")} style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+      <Bell size={19} color={C.text} />
+      {count > 0 && (
+        <span style={{
+          position: "absolute", top: -4, right: -4, background: C.alert, color: "#fff",
+          fontSize: 10, fontWeight: 700, borderRadius: 999, minWidth: 16, height: 16,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px",
+        }}>{count > 9 ? "9+" : count}</span>
+      )}
+    </button>
+  );
+}
+
 function CashierDashboard({ data, session, goto }) {
   const activeTank = data.tanks.find((t) => t.status === "ACTIVE");
   const m = activeTank ? tankMetrics(activeTank) : null;
@@ -392,7 +451,7 @@ function CashierDashboard({ data, session, goto }) {
           <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Hello, Cashier</div>
           <div style={{ fontSize: 12, color: C.sub }}>{fmtDate(todayStr())}</div>
         </div>
-        <Bell size={19} color={C.text} />
+        <NotificationBell data={data} goto={goto} />
       </div>
 
       {!activeTank && (
@@ -486,7 +545,7 @@ function ManagerDashboard({ data, session, goto }) {
           <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Hello, Manager</div>
           <div style={{ fontSize: 12, color: C.sub }}>{fmtDate(todayStr())}</div>
         </div>
-        <Bell size={19} color={C.text} />
+        <NotificationBell data={data} goto={goto} />
       </div>
 
       {activeTank && (
@@ -602,7 +661,7 @@ function OwnerDashboard({ data, session, goto }) {
           <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Hello, Owner</div>
           <div style={{ fontSize: 12, color: C.sub }}>{fmtDate(todayStr())}</div>
         </div>
-        <Bell size={19} color={C.text} />
+        <NotificationBell data={data} goto={goto} />
       </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
@@ -1357,6 +1416,43 @@ function ReportsPage({ data, goto }) {
 /* Moniepoint Log — full replica of terminal transaction history          */
 /* ---------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------- */
+/* Notifications — live alerts derived from current data                  */
+/* ---------------------------------------------------------------------- */
+
+function NotificationsPage({ data, goto }) {
+  const notifications = getNotifications(data);
+  return (
+    <div style={{ padding: "0 16px 16px" }}>
+      <TopBar title="Notifications" onBack={() => goto("dashboard")} />
+      {notifications.length === 0 && (
+        <Card><div style={{ color: C.faint, fontSize: 13, textAlign: "center", padding: "24px 0" }}>All clear — no alerts right now.</div></Card>
+      )}
+      {notifications.map((n) => {
+        const t = toneColors(n.tone);
+        const Icon = n.icon;
+        return (
+          <Card key={n.id} style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: t.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Icon size={16} color={t.fg} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{n.title}</span>
+                  <Badge tone={n.tone}>{n.tone === "alert" ? "Urgent" : "Review"}</Badge>
+                </div>
+                <div style={{ fontSize: 12.5, color: C.sub, marginTop: 3 }}>{n.message}</div>
+                <div style={{ fontSize: 10.5, color: C.faint, marginTop: 4 }}>{fmtDate(n.date)}</div>
+              </div>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 function MoniepointLogPage({ goto }) {
   const [date, setDate] = useState(todayStr());
   const [rows, setRows] = useState(null);
@@ -1729,6 +1825,7 @@ export default function App() {
     settings: <SettingsPage {...pageProps} />,
     users: <ManageUsersPage goto={goto} session={session} />,
     moniepointLog: <MoniepointLogPage goto={goto} />,
+    notifications: <NotificationsPage data={data} goto={goto} />,
     more: <MorePage session={session} data={data} goto={goto} onLogout={handleLogout} />,
   };
 
