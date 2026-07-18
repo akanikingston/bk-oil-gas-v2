@@ -177,6 +177,27 @@ function StatTile({ label, value, tone = "neutral", icon: Icon }) {
     </Card>
   );
 }
+function CircularGauge({ percent, size = 70 }) {
+  const clamped = Math.max(0, Math.min(100, percent));
+  const stroke = 7;
+  const r = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * r;
+  const offset = circumference * (1 - clamped / 100);
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+        <circle cx={size / 2} cy={size / 2} r={r} stroke={C.border} strokeWidth={stroke} fill="none" />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} stroke={C.success} strokeWidth={stroke} fill="none"
+          strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
+        />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: C.text }}>
+        {Math.round(clamped)}%
+      </div>
+    </div>
+  );
+}
 function Segmented({ options, value, onChange }) {
   return (
     <div style={{ display: "flex", background: C.bgAlt, borderRadius: 12, padding: 4, gap: 4, marginBottom: 14 }}>
@@ -360,13 +381,16 @@ function CashierDashboard({ data, session, goto }) {
   const m = activeTank ? tankMetrics(activeTank) : null;
   const todaySales = m ? sum(m.dailyRows.filter((r) => r.date === todayStr()), (r) => r.salesAmountDay) : 0;
   const todayKg = activeTank ? sum(activeTank.dailySales.filter((d) => d.date === todayStr()), (d) => (d.p1c - d.p1o) + (d.p2c - d.p2o)) : 0;
+  const todayCash = activeTank ? sum(activeTank.dailySales.filter((d) => d.date === todayStr()), (d) => d.cash) : 0;
+  const todayPos = activeTank ? sum(activeTank.dailySales.filter((d) => d.date === todayStr()), (d) => d.pos) : 0;
+  const remainingPct = m && m.totalPurchasedKg ? (m.remainingStock / m.totalPurchasedKg) * 100 : 0;
 
   return (
     <div style={{ padding: "0 16px 16px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Hi, {session.name}</div>
-          <div style={{ fontSize: 12, color: C.sub }}>Cashier</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Hello, Cashier</div>
+          <div style={{ fontSize: 12, color: C.sub }}>{fmtDate(todayStr())}</div>
         </div>
         <Bell size={19} color={C.text} />
       </div>
@@ -379,34 +403,47 @@ function CashierDashboard({ data, session, goto }) {
       )}
 
       {activeTank && (
-        <Card style={{ marginBottom: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Active Tank {activeTank.tankNo}</div>
-            <Badge tone="success">ACTIVE</Badge>
+        <div style={{ background: C.success, borderRadius: RADIUS, padding: 16, marginBottom: 14, boxShadow: SHADOW }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Today's Sales</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 10, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.85)" }}>KG Sold</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>{kgFmt(todayKg)}</div>
+            </div>
+            <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 10, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.85)" }}>Cash</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>{currency(todayCash)}</div>
+            </div>
+            <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 10, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.85)" }}>POS</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>{currency(todayPos)}</div>
+            </div>
+            <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 10, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.85)" }}>Revenue</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>{currency(todaySales)}</div>
+            </div>
           </div>
-          <Row label="Supplier" value={activeTank.purchases[activeTank.purchases.length - 1]?.supplier || "—"} />
-          <Row label="Purchase Date" value={fmtDate(activeTank.purchases[0]?.date || activeTank.startDate)} />
-          <Row label="Started Selling" value={fmtDate(activeTank.startDate)} />
-          <Row label="Qty Purchased" value={kgFmt(m.totalPurchasedKg)} />
-          <Row label="Remaining (Est.)" value={kgFmt(m.remainingStock)} strong />
-          <Row label="Purchase Rate" value={currency(activeTank.purchases[activeTank.purchases.length - 1]?.rate || 0) + "/kg"} />
+        </div>
+      )}
 
-          <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-            <StatTile label="Today's Sales" value={kgFmt(todayKg)} tone="success" />
-            <StatTile label="Today's Revenue" value={currency(todaySales)} tone="primary" />
+      {activeTank && (
+        <Card style={{ marginBottom: 14 }} onClick={() => goto("activeTank")}>
+          <div style={{ fontSize: 11, color: C.sub, fontWeight: 600, marginBottom: 6 }}>ACTIVE TANK</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{activeTank.tankNo}</div>
+              <div style={{ fontSize: 12, color: C.sub, marginTop: 2 }}>{kgFmt(m.remainingStock)} Remaining</div>
+            </div>
+            <CircularGauge percent={remainingPct} />
           </div>
-          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-            <StatTile label="Cash" value={currency(sum(activeTank.dailySales, (d) => d.cash))} />
-            <StatTile label="POS" value={currency(sum(activeTank.dailySales, (d) => d.pos))} />
-          </div>
+          <div style={{ fontSize: 11.5, color: C.primary, marginTop: 10, textAlign: "center" }}>View full Active Tank →</div>
         </Card>
       )}
 
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Quick Actions</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-        <QuickAction icon={Wallet} label="Daily Sales" tone="primary" onClick={() => goto("dailySales")} />
-        <QuickAction icon={Receipt} label="Expense" tone="success" onClick={() => goto("expense")} />
-        <QuickAction icon={PackageMinus} label="Usage" tone="warn" onClick={() => goto("internalUsage")} />
-        <QuickAction icon={Fuel} label="LPG Purchase" tone="alert" onClick={() => goto("purchase")} />
+        <QuickAction icon={Fuel} label="Daily Sales" tone="success" onClick={() => goto("dailySales")} />
+        <QuickAction icon={FileBarChart2} label="View Sales" tone="primary" onClick={() => goto("activeTank")} />
       </div>
 
       {activeTank && (
@@ -432,15 +469,56 @@ function Row({ label, value, strong }) {
 function ManagerDashboard({ data, session, goto }) {
   const closedFlagged = data.tanks.filter((t) => t.closure && t.closure.varianceType !== "Normal");
   const pendingExpenses = data.tanks.flatMap((t) => t.expenses).length;
+  const activeTank = data.tanks.find((t) => t.status === "ACTIVE");
+  const m = activeTank ? tankMetrics(activeTank) : null;
+  const todaySales = m ? sum(m.dailyRows.filter((r) => r.date === todayStr()), (r) => r.salesAmountDay) : 0;
+  const todayKg = activeTank ? sum(activeTank.dailySales.filter((d) => d.date === todayStr()), (d) => (d.p1c - d.p1o) + (d.p2c - d.p2o)) : 0;
+  const todayCash = activeTank ? sum(activeTank.dailySales.filter((d) => d.date === todayStr()), (d) => d.cash) : 0;
+  const todayPos = activeTank ? sum(activeTank.dailySales.filter((d) => d.date === todayStr()), (d) => d.pos) : 0;
+  const todayExpenses = activeTank ? sum(activeTank.expenses.filter((e) => e.date === todayStr()), (e) => e.amount) : 0;
+  const todayProfit = todaySales - todayExpenses;
+  const remainingPct = m && m.totalPurchasedKg ? (m.remainingStock / m.totalPurchasedKg) * 100 : 0;
+
   return (
     <div style={{ padding: "0 16px 16px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Hi, {session.name}</div>
-          <div style={{ fontSize: 12, color: C.sub }}>Manager</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Hello, Manager</div>
+          <div style={{ fontSize: 12, color: C.sub }}>{fmtDate(todayStr())}</div>
         </div>
         <Bell size={19} color={C.text} />
       </div>
+
+      {activeTank && (
+        <>
+          <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+            <StatTile label="Today's KG Sold" value={kgFmt(todayKg)} tone="primary" icon={Fuel} />
+            <StatTile label="Today's Revenue" value={currency(todaySales)} tone="success" icon={TrendingUp} />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+            <StatTile label="Cash" value={currency(todayCash)} tone="success" icon={Wallet} />
+            <StatTile label="POS" value={currency(todayPos)} tone="primary" icon={Wallet} />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+            <StatTile label="Expenses" value={currency(todayExpenses)} tone="warn" icon={Receipt} />
+            <StatTile label="Profit" value={currency(todayProfit)} tone="success" icon={DollarSign} />
+          </div>
+
+          <Card style={{ marginBottom: 14 }} onClick={() => goto("activeTank")}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div>
+                <div style={{ fontSize: 11, color: C.sub, fontWeight: 600 }}>ACTIVE TANK</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{activeTank.tankNo}</div>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: C.success }}>{Math.round(remainingPct)}%</div>
+            </div>
+            <div style={{ background: C.bgAlt, borderRadius: 999, height: 8, overflow: "hidden", marginBottom: 6 }}>
+              <div style={{ width: `${Math.max(0, Math.min(100, remainingPct))}%`, background: C.success, height: "100%" }} />
+            </div>
+            <div style={{ fontSize: 12, color: C.sub }}>{kgFmt(m.remainingStock)} Remaining</div>
+          </Card>
+        </>
+      )}
 
       <Card style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Alerts</div>
@@ -469,10 +547,10 @@ function ManagerDashboard({ data, session, goto }) {
 
       <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Quick Actions</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <QuickAction icon={FileBarChart2} label="Daily Sales Report" tone="primary" onClick={() => goto("reports")} />
-        <QuickAction icon={Archive} label="Tank Reconciliation" tone="success" onClick={() => goto("history")} />
-        <QuickAction icon={Receipt} label="Expense Report" tone="warn" onClick={() => goto("reports")} />
-        <QuickAction icon={ShieldAlert} label="Review Investigations" tone="alert" onClick={() => goto("audit")} />
+        <QuickAction icon={Wallet} label="Daily Sales" tone="success" onClick={() => goto("dailySales")} />
+        <QuickAction icon={Fuel} label="Active Tank" tone="primary" onClick={() => goto("activeTank")} />
+        <QuickAction icon={FileBarChart2} label="Reports" tone="warn" onClick={() => goto("reports")} />
+        <QuickAction icon={ShieldAlert} label="Audit" tone="alert" onClick={() => goto("audit")} />
       </div>
     </div>
   );
@@ -482,37 +560,72 @@ function ManagerDashboard({ data, session, goto }) {
 /* Owner Dashboard                                                          */
 /* ---------------------------------------------------------------------- */
 
+function MiniLineChart({ points, color = C.success, height = 140 }) {
+  if (!points.length) return <div style={{ color: C.faint, fontSize: 12, textAlign: "center", padding: "30px 0" }}>Not enough data yet.</div>;
+  const width = 320;
+  const max = Math.max(...points.map((p) => p.value), 1);
+  const min = Math.min(...points.map((p) => p.value), 0);
+  const range = max - min || 1;
+  const stepX = points.length > 1 ? width / (points.length - 1) : 0;
+  const coords = points.map((p, i) => ({ x: i * stepX, y: height - ((p.value - min) / range) * (height - 20) - 10 }));
+  const linePath = coords.map((c, i) => `${i === 0 ? "M" : "L"} ${c.x} ${c.y}`).join(" ");
+  const areaPath = `${linePath} L ${coords[coords.length - 1].x} ${height} L 0 ${height} Z`;
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none">
+      <path d={areaPath} fill={color} opacity={0.12} />
+      <path d={linePath} fill="none" stroke={color} strokeWidth={2.5} />
+      {coords.map((c, i) => <circle key={i} cx={c.x} cy={c.y} r={3} fill={color} />)}
+    </svg>
+  );
+}
+
 function OwnerDashboard({ data, session, goto }) {
   const closed = data.tanks.filter((t) => t.status === "CLOSED");
   const active = data.tanks.filter((t) => t.status === "ACTIVE");
   const totalRevenue = sum(closed, (t) => tankMetrics(t).totalSalesAmount) + sum(active, (t) => tankMetrics(t).totalSalesAmount);
   const netProfit = sum(closed, (t) => tankMetrics(t).netProfit);
-  const totalShortage = sum(closed.filter(t => t.closure.variance < 0), t => Math.abs(t.closure.variance));
+  const totalKgSold = sum(data.tanks, (t) => tankMetrics(t).totalKgSold);
+
+  // Revenue trend across all tanks, grouped by date
+  const revenueByDate = {};
+  data.tanks.forEach((t) => {
+    tankMetrics(t).dailyRows.forEach((r) => {
+      revenueByDate[r.date] = (revenueByDate[r.date] || 0) + r.salesAmountDay;
+    });
+  });
+  const trendPoints = Object.keys(revenueByDate).sort().slice(-14).map((date) => ({ date, value: revenueByDate[date] }));
 
   return (
     <div style={{ padding: "0 16px 16px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Hi, {session.name}</div>
-          <div style={{ fontSize: 12, color: C.sub }}>Owner</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Hello, Owner</div>
+          <div style={{ fontSize: 12, color: C.sub }}>{fmtDate(todayStr())}</div>
         </div>
         <Bell size={19} color={C.text} />
       </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-        <StatTile label="Total Revenue" value={currency(totalRevenue)} tone="primary" icon={DollarSign} />
-        <StatTile label="Net Profit" value={currency(netProfit)} tone="success" icon={TrendingUp} />
+        <StatTile label="Total Revenue" value={currency(totalRevenue)} tone="success" icon={TrendingUp} />
+        <StatTile label="Total Profit" value={currency(netProfit)} tone="primary" icon={DollarSign} />
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <StatTile label="Total Shortage" value={kgFmt(totalShortage)} tone="alert" icon={AlertTriangle} />
-        <StatTile label="Active Tanks" value={active.length} tone="neutral" icon={Fuel} />
+        <StatTile label="Total KG Sold" value={kgFmt(totalKgSold)} tone="warn" icon={Fuel} />
+        <StatTile label="Active Tanks" value={active.length} tone="neutral" icon={Archive} />
       </div>
 
-      <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Quick Actions</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-        <QuickAction icon={Archive} label="All Tanks" tone="primary" onClick={() => goto("history")} />
-        <QuickAction icon={FileBarChart2} label="Financial Reports" tone="success" onClick={() => goto("reports")} />
-        <QuickAction icon={UserCog} label="User Management" tone="warn" onClick={() => goto("users")} />
+      <Card style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>Revenue Overview</div>
+        <div style={{ fontSize: 11, color: C.sub, marginBottom: 4 }}>Last {trendPoints.length} day{trendPoints.length === 1 ? "" : "s"} with sales</div>
+        <MiniLineChart points={trendPoints} />
+      </Card>
+
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Quick Access</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <QuickAction icon={FileBarChart2} label="Reports" tone="success" onClick={() => goto("reports")} />
+        <QuickAction icon={Archive} label="Tanks" tone="primary" onClick={() => goto("history")} />
+        <QuickAction icon={DollarSign} label="Financial" tone="warn" onClick={() => goto("reports")} />
+        <QuickAction icon={UserCog} label="User Management" tone="alert" onClick={() => goto("users")} />
       </div>
     </div>
   );
@@ -531,6 +644,52 @@ function NoActiveTankNotice({ title, goto }) {
   );
 }
 
+/* ---------------------------------------------------------------------- */
+/* Active Tank — compilation of daily sales, kg sold, cash, POS, revenue  */
+/* ---------------------------------------------------------------------- */
+
+function ActiveTankPage({ data, goto }) {
+  const activeTank = data.tanks.find((t) => t.status === "ACTIVE");
+  if (!activeTank) return <NoActiveTankNotice title="Active Tank" goto={goto} />;
+  const m = tankMetrics(activeTank);
+  const totalCash = sum(activeTank.dailySales, (d) => d.cash);
+  const totalPos = sum(activeTank.dailySales, (d) => d.pos);
+  const rows = m.dailyRows.slice().reverse();
+
+  return (
+    <div style={{ padding: "0 16px 16px" }}>
+      <TopBar title={`Active Tank — ${activeTank.tankNo}`} onBack={() => goto("dashboard")} right={<Badge tone="success">ACTIVE</Badge>} />
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+        <StatTile label="Total KG Sold" value={kgFmt(m.totalKgSold)} tone="primary" icon={Fuel} />
+        <StatTile label="Revenue" value={currency(m.totalSalesAmount)} tone="success" icon={TrendingUp} />
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <StatTile label="Cash" value={currency(totalCash)} tone="success" icon={Wallet} />
+        <StatTile label="POS" value={currency(totalPos)} tone="primary" icon={Wallet} />
+      </div>
+
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Daily Sales Log</div>
+      <Card style={{ marginBottom: 16 }}>
+        <ListTable
+          columns={[
+            { key: "date", label: "Date" },
+            { key: "kg", label: "KG Sold", render: (r) => kgFmt(r.kgSoldDay) },
+            { key: "cash", label: "Cash", render: (r) => currency(r.cash) },
+            { key: "pos", label: "POS", render: (r) => currency(r.pos) },
+            { key: "revenue", label: "Revenue", render: (r) => currency(r.salesAmountDay) },
+          ]}
+          rows={rows}
+          empty="No daily sales recorded yet."
+        />
+      </Card>
+
+      <Button full onClick={() => goto("dailySales")} style={{ marginBottom: 10 }}><Plus size={15} /> Add Daily Sales</Button>
+      <Button variant="alert" full onClick={() => goto("endTank")}><Lock size={15} /> End Tank</Button>
+    </div>
+  );
+}
+
 function DailySalesPage({ data, update, log, goto }) {
   const activeTank = data.tanks.find((t) => t.status === "ACTIVE");
   const [date, setDate] = useState(todayStr());
@@ -539,31 +698,106 @@ function DailySalesPage({ data, update, log, goto }) {
   const [price, setPrice] = useState(data.settings.defaultPricePerKg);
   const [cash, setCash] = useState("");
   const [pos, setPos] = useState("");
+  const [posTouched, setPosTouched] = useState(false);
+  const [moniepointTotal, setMoniepointTotal] = useState(null);
+  const [moniepointRows, setMoniepointRows] = useState([]);
+  const [showLog, setShowLog] = useState(false);
+
+  // Expenses to add for this day, staged locally until Save & Close Day
+  const [expCategory, setExpCategory] = useState("Fuel");
+  const [expNote, setExpNote] = useState("");
+  const [expAmount, setExpAmount] = useState("");
+  const [expPaidBy, setExpPaidBy] = useState("Cash");
+  const [pendingExpenses, setPendingExpenses] = useState([]);
+
+  // Internal usage to add for this day, staged locally until Save & Close Day
+  const [useType, setUseType] = useState("Generator");
+  const [useQty, setUseQty] = useState("");
+  const [useNote, setUseNote] = useState("");
+  const [useApprovedBy, setUseApprovedBy] = useState("");
+  const [pendingUsage, setPendingUsage] = useState([]);
+
+  // Auto-fill POS from Moniepoint for this date, and stay live: any new
+  // confirmed transaction for this date updates the total automatically.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadForDate() {
+      const { data: rows, error } = await supabase
+        .from("pos_transactions")
+        .select("transaction_reference, amount, transaction_time, transaction_type, status")
+        .gte("transaction_time", `${date}T00:00:00`)
+        .lte("transaction_time", `${date}T23:59:59`)
+        .order("transaction_time", { ascending: false });
+      if (cancelled) return;
+      if (error) { setMoniepointRows([]); setMoniepointTotal(null); return; }
+      setMoniepointRows(rows || []);
+      const total = sum(rows || [], (r) => r.amount);
+      setMoniepointTotal(total);
+      setPosTouched((touched) => {
+        if (!touched) setPos(String(total));
+        return touched;
+      });
+    }
+    loadForDate();
+
+    const channel = supabase
+      .channel(`pos_transactions_${date}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "pos_transactions" }, (payload) => {
+        const txDate = (payload.new.transaction_time || "").slice(0, 10);
+        if (txDate === date) loadForDate();
+      })
+      .subscribe();
+
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+  }, [date]);
 
   if (!activeTank) return <NoActiveTankNotice title="Daily Sales" goto={goto} />;
 
   const kg1 = (Number(p1c) || 0) - (Number(p1o) || 0);
   const kg2 = (Number(p2c) || 0) - (Number(p2o) || 0);
   const totalKg = kg1 + kg2;
-  const internalDay = sum(activeTank.internalUsage.filter((u) => u.date === date), (u) => u.kg);
+  const pendingUsageKg = sum(pendingUsage, (u) => u.kg);
+  const internalDay = sum(activeTank.internalUsage.filter((u) => u.date === date), (u) => u.kg) + pendingUsageKg;
   const paidKg = totalKg - internalDay;
   const salesAmount = paidKg * (Number(price) || 0);
   const realized = (Number(cash) || 0) + (Number(pos) || 0);
   const shortOver = realized - salesAmount;
+  const pendingExpenseTotal = sum(pendingExpenses, (e) => e.amount);
 
   const tankTotalKg = sum(activeTank.dailySales, (d) => (d.p1c - d.p1o) + (d.p2c - d.p2o));
 
+  function addExpense() {
+    if (!expAmount) return;
+    setPendingExpenses((prev) => [...prev, { id: uid(), date, category: expCategory, note: expNote, amount: Number(expAmount) || 0, paidBy: expPaidBy }]);
+    setExpNote(""); setExpAmount("");
+  }
+  function removeExpense(id) { setPendingExpenses((prev) => prev.filter((e) => e.id !== id)); }
+
+  function addUsage() {
+    if (!useQty) return;
+    setPendingUsage((prev) => [...prev, { id: uid(), date, type: useType, kg: Number(useQty) || 0, remarks: useNote, approvedBy: useType === "Free Issue" ? useApprovedBy : "" }]);
+    setUseNote(""); setUseQty(""); setUseApprovedBy("");
+  }
+  function removeUsage(id) { setPendingUsage((prev) => prev.filter((u) => u.id !== id)); }
+
   function submit() {
     const entry = { id: uid(), date, p1o: Number(p1o) || 0, p1c: Number(p1c) || 0, p2o: Number(p2o) || 0, p2c: Number(p2c) || 0, price: Number(price) || 0, cash: Number(cash) || 0, pos: Number(pos) || 0 };
-    const tanks = data.tanks.map((t) => t.id === activeTank.id ? { ...t, dailySales: [...t.dailySales.filter((d) => d.date !== date), entry] } : t);
+    const tanks = data.tanks.map((t) => t.id === activeTank.id ? {
+      ...t,
+      dailySales: [...t.dailySales.filter((d) => d.date !== date), entry],
+      expenses: [...t.expenses, ...pendingExpenses],
+      internalUsage: [...t.internalUsage, ...pendingUsage],
+    } : t);
     update({ ...data, tanks });
-    log(`Daily sales recorded for ${date}: ${kgFmt(totalKg)} sold, ${currency(realized)} realized`);
+    log(`Daily sales recorded for ${date}: ${kgFmt(totalKg)} sold, ${currency(realized)} realized, ${pendingExpenses.length} expense(s), ${pendingUsage.length} usage entr${pendingUsage.length === 1 ? "y" : "ies"}`);
+    goto("activeTank");
   }
 
   return (
     <div style={{ padding: "0 16px 16px" }}>
       <TopBar title="Daily Sales" onBack={() => goto("dashboard")} right={<span style={{ fontSize: 12, color: C.sub }}>{fmtDate(date)}</span>} />
-      <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+      <Field label="Date"><Input type="date" value={date} onChange={(e) => { setDate(e.target.value); setPosTouched(false); }} /></Field>
 
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.primary, marginBottom: 10 }}>PUMP 1</div>
@@ -593,7 +827,39 @@ function DailySalesPage({ data, update, log, goto }) {
         </div>
         <Field label="Selling Price (₦/kg)"><Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} /></Field>
         <Field label="Cash Received (₦)"><Input type="number" value={cash} onChange={(e) => setCash(e.target.value)} /></Field>
-        <Field label="POS Received (₦)"><Input type="number" value={pos} onChange={(e) => setPos(e.target.value)} /></Field>
+        <Field label="POS Received (₦)">
+          <Input type="number" value={pos} onChange={(e) => { setPos(e.target.value); setPosTouched(true); }} />
+        </Field>
+        {moniepointTotal !== null && (
+          <div style={{ background: C.primarySoft, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 10.5, color: C.sub }}>
+                  MONIEPOINT SYNCED ({moniepointRows.length} txn{moniepointRows.length === 1 ? "" : "s"})
+                  {!posTouched && <span style={{ color: C.success }}> · auto-filled</span>}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.primary }}>{currency(moniepointTotal)}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {posTouched && (
+                  <Button variant="outline" onClick={() => { setPos(String(moniepointTotal)); setPosTouched(false); }} style={{ padding: "6px 10px", fontSize: 11.5 }}>Reset to synced</Button>
+                )}
+                <Button variant="ghost" onClick={() => setShowLog((s) => !s)} style={{ padding: "6px 10px", fontSize: 11.5 }}>{showLog ? "Hide" : "View"} log</Button>
+              </div>
+            </div>
+            {showLog && (
+              <div style={{ marginTop: 10, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+                {moniepointRows.length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No Moniepoint transactions for this date yet.</div>}
+                {moniepointRows.map((r) => (
+                  <div key={r.transaction_reference} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "5px 0", borderBottom: `1px solid ${C.border}` }}>
+                    <span style={{ color: C.sub }}>{r.transaction_time ? new Date(r.transaction_time).toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+                    <span style={{ color: C.text }}>{currency(r.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 10 }}>
           <div style={{ flex: 1, background: C.primarySoft, borderRadius: 10, padding: "10px 12px" }}>
             <div style={{ fontSize: 10.5, color: C.sub }}>SALES AMOUNT (Auto)</div>
@@ -609,7 +875,75 @@ function DailySalesPage({ data, update, log, goto }) {
         </div>
       </Card>
 
-      <Button full onClick={submit}>Save Daily Sales</Button>
+      {/* Expenses for the day */}
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.primary, marginBottom: 10 }}>EXPENSES ({fmtDate(date)})</div>
+        {pendingExpenses.map((e) => (
+          <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${C.border}` }}>
+            <div>
+              <div style={{ fontSize: 12.5, color: C.text }}>{e.category} — {currency(e.amount)}</div>
+              <div style={{ fontSize: 10.5, color: C.faint }}>{e.note || "—"} · {e.paidBy}</div>
+            </div>
+            <button onClick={() => removeExpense(e.id)} style={{ background: "none", border: "none", color: C.alert, cursor: "pointer" }}><X size={14} /></button>
+          </div>
+        ))}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: pendingExpenses.length ? 10 : 0 }}>
+          <Field label="Category">
+            <Select value={expCategory} onChange={(e) => setExpCategory(e.target.value)}>
+              <option>Fuel</option><option>Repairs</option><option>Salaries</option><option>Electricity</option><option>Misc</option>
+            </Select>
+          </Field>
+          <Field label="Amount (₦)"><Input type="number" value={expAmount} onChange={(e) => setExpAmount(e.target.value)} /></Field>
+        </div>
+        <Field label="Note"><Input value={expNote} onChange={(e) => setExpNote(e.target.value)} placeholder="What was this for?" /></Field>
+        <Field label="Paid By">
+          <div style={{ display: "flex", gap: 16 }}>
+            {["Cash", "Bank Transfer", "POS"].map((m) => (
+              <label key={m} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.text, cursor: "pointer" }}>
+                <input type="radio" checked={expPaidBy === m} onChange={() => setExpPaidBy(m)} /> {m}
+              </label>
+            ))}
+          </div>
+        </Field>
+        <Button variant="success" onClick={addExpense} disabled={!expAmount}><Plus size={14} /> Add Expense</Button>
+        {pendingExpenses.length > 0 && (
+          <div style={{ fontSize: 11.5, color: C.sub, marginTop: 8 }}>Today's expenses so far: <b style={{ color: C.text }}>{currency(pendingExpenseTotal)}</b></div>
+        )}
+      </Card>
+
+      {/* Internal usage for the day */}
+      <Card style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.primary, marginBottom: 10 }}>INTERNAL USAGE ({fmtDate(date)})</div>
+        {pendingUsage.map((u) => (
+          <div key={u.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${C.border}` }}>
+            <div>
+              <div style={{ fontSize: 12.5, color: C.text }}>{u.type} — {kgFmt(u.kg)}</div>
+              <div style={{ fontSize: 10.5, color: C.faint }}>{u.remarks || "—"}{u.approvedBy ? ` · Approved by ${u.approvedBy}` : ""}</div>
+            </div>
+            <button onClick={() => removeUsage(u.id)} style={{ background: "none", border: "none", color: C.alert, cursor: "pointer" }}><X size={14} /></button>
+          </div>
+        ))}
+        <div style={{ marginTop: pendingUsage.length ? 10 : 0 }}>
+          <Field label="Type">
+            <Select value={useType} onChange={(e) => setUseType(e.target.value)}>
+              <option>Generator</option><option>Management</option><option>Free Issue</option>
+            </Select>
+          </Field>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <Field label="Quantity (kg)"><Input type="number" value={useQty} onChange={(e) => setUseQty(e.target.value)} /></Field>
+            <Field label={useType === "Free Issue" ? "Reason" : "Remarks"}><Input value={useNote} onChange={(e) => setUseNote(e.target.value)} /></Field>
+          </div>
+          {useType === "Free Issue" && (
+            <Field label="Approved By"><Input value={useApprovedBy} onChange={(e) => setUseApprovedBy(e.target.value)} /></Field>
+          )}
+        </div>
+        <Button variant="success" onClick={addUsage} disabled={!useQty}><Plus size={14} /> Add Usage</Button>
+        {pendingUsage.length > 0 && (
+          <div style={{ fontSize: 11.5, color: C.sub, marginTop: 8 }}>Today's usage so far: <b style={{ color: C.text }}>{kgFmt(pendingUsageKg)}</b></div>
+        )}
+      </Card>
+
+      <Button full onClick={submit}>Save &amp; Close Day</Button>
 
       <div style={{ fontSize: 11, color: C.faint, textAlign: "center", marginTop: 10 }}>
         This Tank Total Kg Sold: <b style={{ color: C.text }}>{kgFmt(tankTotalKg)}</b>
@@ -1020,6 +1354,83 @@ function ReportsPage({ data, goto }) {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Moniepoint Log — full replica of terminal transaction history          */
+/* ---------------------------------------------------------------------- */
+
+function MoniepointLogPage({ goto }) {
+  const [date, setDate] = useState(todayStr());
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setRows(null);
+      const { data, error: fetchError } = await supabase
+        .from("pos_transactions")
+        .select("*")
+        .gte("transaction_time", `${date}T00:00:00`)
+        .lte("transaction_time", `${date}T23:59:59`)
+        .order("transaction_time", { ascending: false });
+      if (cancelled) return;
+      if (fetchError) { setError(fetchError.message); setRows([]); return; }
+      setError("");
+      setRows(data || []);
+    }
+    load();
+
+    const channel = supabase
+      .channel(`pos_log_${date}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "pos_transactions" }, () => load())
+      .subscribe();
+
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+  }, [date]);
+
+  const total = rows ? sum(rows, (r) => r.amount) : 0;
+
+  return (
+    <div style={{ padding: "0 16px 16px" }}>
+      <TopBar title="Moniepoint Log" onBack={() => goto("more")} />
+      <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+        <StatTile label="Transactions" value={rows ? rows.length : "…"} tone="primary" />
+        <StatTile label="Total" value={currency(total)} tone="success" />
+      </div>
+
+      {error && (
+        <Card style={{ marginBottom: 12, background: C.alertSoft, border: "none" }}>
+          <div style={{ color: C.alert, fontSize: 12.5 }}>{error}</div>
+        </Card>
+      )}
+
+      <Card>
+        {rows === null && <div style={{ color: C.faint, fontSize: 13, textAlign: "center", padding: "16px 0" }}>Loading...</div>}
+        {rows && rows.length === 0 && <div style={{ color: C.faint, fontSize: 13, textAlign: "center", padding: "16px 0" }}>No Moniepoint transactions for this date.</div>}
+        {rows && rows.map((r) => (
+          <div key={r.transaction_reference} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${C.border}` }}>
+            <div>
+              <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{currency(r.amount)}</div>
+              <div style={{ fontSize: 11, color: C.faint }}>
+                {r.transaction_time ? new Date(r.transaction_time).toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit" }) : "—"}
+                {r.terminal_serial ? ` · ${r.terminal_serial}` : ""}
+              </div>
+            </div>
+            <Badge tone={r.status === "APPROVED" || r.status === "SUCCESSFUL" ? "success" : "neutral"}>{r.status || r.transaction_type || "—"}</Badge>
+          </div>
+        ))}
+      </Card>
+      <div style={{ fontSize: 11, color: C.faint, marginTop: 10, lineHeight: 1.6 }}>
+        This is a live mirror of your Moniepoint terminal — every confirmed transaction lands here
+        automatically via webhook, the same total that auto-fills Daily Sales for that date.
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
 /* Directory (Suppliers / Customers) + Settings                            */
 /* ---------------------------------------------------------------------- */
 
@@ -1066,6 +1477,7 @@ function MorePage({ session, data, goto, onLogout }) {
     { key: "audit", label: "Audit Report", icon: ShieldAlert },
     { key: "reports", label: "Reports", icon: FileBarChart2 },
     { key: "history", label: "Tank History", icon: Archive },
+    { key: "moniepointLog", label: "Moniepoint Log", icon: Wallet },
   ];
   if (session.role === "Owner") {
     items.push({ key: "users", label: "Manage Users", icon: UserCog });
@@ -1165,20 +1577,19 @@ function ManageUsersPage({ goto, session }) {
 const NAV_BY_ROLE = {
   Cashier: [
     { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { key: "reports", label: "Reports", icon: FileBarChart2 },
-    { key: "history", label: "History", icon: Clock },
+    { key: "dailySales", label: "Daily Sales", icon: Wallet },
     { key: "more", label: "More", icon: MoreHorizontal },
   ],
   Manager: [
     { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { key: "activeTank", label: "Active Tank", icon: Fuel },
     { key: "reports", label: "Reports", icon: FileBarChart2 },
-    { key: "audit", label: "Approvals", icon: ShieldAlert },
     { key: "more", label: "More", icon: MoreHorizontal },
   ],
   Owner: [
     { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { key: "reports", label: "Financials", icon: FileBarChart2 },
-    { key: "more2", label: "Users", icon: UserCog },
+    { key: "history", label: "Tanks", icon: Archive },
+    { key: "reports", label: "Reports", icon: FileBarChart2 },
     { key: "more", label: "More", icon: MoreHorizontal },
   ],
 };
@@ -1265,7 +1676,7 @@ export default function App() {
       return next;
     });
   }
-  function goto(key) { setPage(key === "more2" ? "users" : key); }
+  function goto(key) { setPage(key); }
   async function handleLogout() {
     await supabase.auth.signOut();
     setSession(null);
@@ -1305,6 +1716,7 @@ export default function App() {
   const pages = {
     dashboard: homeByRole[session.role],
     dailySales: <DailySalesPage {...pageProps} />,
+    activeTank: <ActiveTankPage {...pageProps} />,
     internalUsage: <InternalUsagePage {...pageProps} />,
     expense: <ExpensePage {...pageProps} />,
     purchase: <PurchasePage {...pageProps} />,
@@ -1316,10 +1728,11 @@ export default function App() {
     customers: <DirectoryPage title="Customers" items={data.customers} addItem={(item) => update({ ...data, customers: [...data.customers, item] })} goto={goto} />,
     settings: <SettingsPage {...pageProps} />,
     users: <ManageUsersPage goto={goto} session={session} />,
+    moniepointLog: <MoniepointLogPage goto={goto} />,
     more: <MorePage session={session} data={data} goto={goto} onLogout={handleLogout} />,
   };
 
-  const showBottomNav = ["dashboard", "reports", "audit", "history", "more", "users"].includes(page);
+  const showBottomNav = ["dashboard", "reports", "audit", "history", "more", "users", "dailySales", "activeTank"].includes(page);
 
   return (
     <div style={outer}>
@@ -1338,7 +1751,7 @@ export default function App() {
           )}
           {pages[page]}
         </div>
-        {showBottomNav && <BottomNav items={nav} active={page === "settings" || page === "suppliers" || page === "customers" ? "more" : page === "users" ? "more2" : page} onChange={goto} />}
+        {showBottomNav && <BottomNav items={nav} active={page === "settings" || page === "suppliers" || page === "customers" || page === "users" ? "more" : page} onChange={goto} />}
       </div>
     </div>
   );
