@@ -161,6 +161,36 @@ function getNotifications(data) {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Business Intelligence — month-over-month aggregation helpers           */
+/* ---------------------------------------------------------------------- */
+
+function monthKeyOf(dateStr) { return (dateStr || "").slice(0, 7); } // "2026-07"
+function monthLabel(monthKey) {
+  const [y, m] = monthKey.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-NG", { month: "long", year: "numeric" });
+}
+function shiftMonthKey(monthKey, delta) {
+  const [y, m] = monthKey.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function monthlyTotals(data, monthKey) {
+  let kg = 0, revenue = 0, expenses = 0, cash = 0, pos = 0, internalUsageKg = 0;
+  data.tanks.forEach((t) => {
+    tankMetrics(t).dailyRows.forEach((r) => {
+      if (monthKeyOf(r.date) === monthKey) { kg += r.kgSoldDay; revenue += r.salesAmountDay; cash += r.cash; pos += r.pos; }
+    });
+    t.expenses.forEach((e) => { if (monthKeyOf(e.date) === monthKey) expenses += e.amount; });
+    t.internalUsage.forEach((u) => { if (monthKeyOf(u.date) === monthKey) internalUsageKg += u.kg; });
+  });
+  return { kg, revenue, expenses, netProfit: revenue - expenses, cash, pos, internalUsageKg };
+}
+function pctChange(current, previous) {
+  if (previous === 0) return current === 0 ? 0 : 100;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
+
+/* ---------------------------------------------------------------------- */
 /* UI primitives                                                           */
 /* ---------------------------------------------------------------------- */
 
@@ -683,7 +713,7 @@ function OwnerDashboard({ data, session, goto }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <QuickAction icon={FileBarChart2} label="Reports" tone="success" onClick={() => goto("reports")} />
         <QuickAction icon={Archive} label="Tanks" tone="primary" onClick={() => goto("history")} />
-        <QuickAction icon={DollarSign} label="Financial" tone="warn" onClick={() => goto("reports")} />
+        <QuickAction icon={DollarSign} label="Insights" tone="warn" onClick={() => goto("insights")} />
         <QuickAction icon={UserCog} label="User Management" tone="alert" onClick={() => goto("users")} />
       </div>
     </div>
@@ -1420,6 +1450,63 @@ function ReportsPage({ data, goto }) {
 /* Notifications — live alerts derived from current data                  */
 /* ---------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------- */
+/* Business Intelligence — month-over-month comparisons                   */
+/* ---------------------------------------------------------------------- */
+
+function CompareRow({ label, current, previous, format, invert }) {
+  const change = pctChange(current, previous);
+  const improved = invert ? change <= 0 : change >= 0;
+  const tone = change === 0 ? "neutral" : improved ? "success" : "alert";
+  const t = toneColors(tone);
+  return (
+    <div style={{ padding: "12px 0", borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 12.5, color: C.sub, fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: t.fg }}>
+          {change === 0 ? "No change" : `${change > 0 ? "+" : ""}${change.toFixed(1)}%`}
+        </span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <span style={{ fontSize: 17, fontWeight: 700, color: C.text }}>{format(current)}</span>
+        <span style={{ fontSize: 11.5, color: C.faint }}>vs {format(previous)}</span>
+      </div>
+    </div>
+  );
+}
+
+function BusinessIntelligencePage({ data, goto }) {
+  const thisMonthKey = monthKeyOf(todayStr());
+  const lastMonthKey = shiftMonthKey(thisMonthKey, -1);
+  const thisMonth = monthlyTotals(data, thisMonthKey);
+  const lastMonth = monthlyTotals(data, lastMonthKey);
+
+  return (
+    <div style={{ padding: "0 16px 16px" }}>
+      <TopBar title="Business Intelligence" onBack={() => goto("dashboard")} />
+      <div style={{ fontSize: 12, color: C.sub, marginBottom: 14, textAlign: "center" }}>
+        {monthLabel(thisMonthKey)} vs {monthLabel(lastMonthKey)}
+      </div>
+
+      <Card style={{ marginBottom: 16 }}>
+        <CompareRow label="Revenue" current={thisMonth.revenue} previous={lastMonth.revenue} format={currency} />
+        <CompareRow label="Net Profit (Revenue − Expenses)" current={thisMonth.netProfit} previous={lastMonth.netProfit} format={currency} />
+        <CompareRow label="KG Sold" current={thisMonth.kg} previous={lastMonth.kg} format={kgFmt} />
+        <CompareRow label="Expenses" current={thisMonth.expenses} previous={lastMonth.expenses} format={currency} invert />
+        <CompareRow label="Cash Collected" current={thisMonth.cash} previous={lastMonth.cash} format={currency} />
+        <CompareRow label="POS Collected" current={thisMonth.pos} previous={lastMonth.pos} format={currency} />
+        <div style={{ paddingTop: 12 }}>
+          <CompareRow label="Internal Usage (Gen/Mgmt/Free Issue)" current={thisMonth.internalUsageKg} previous={lastMonth.internalUsageKg} format={kgFmt} invert />
+        </div>
+      </Card>
+
+      <div style={{ fontSize: 11, color: C.faint, lineHeight: 1.6, textAlign: "center" }}>
+        Figures are calculated live from all tanks' daily sales, expenses, and usage logs — no separate report needs generating.
+      </div>
+    </div>
+  );
+}
+
 function NotificationsPage({ data, goto }) {
   const notifications = getNotifications(data);
   return (
@@ -1575,6 +1662,9 @@ function MorePage({ session, data, goto, onLogout }) {
     { key: "history", label: "Tank History", icon: Archive },
     { key: "moniepointLog", label: "Moniepoint Log", icon: Wallet },
   ];
+  if (session.role === "Manager" || session.role === "Owner") {
+    items.push({ key: "insights", label: "Business Intelligence", icon: TrendingUp });
+  }
   if (session.role === "Owner") {
     items.push({ key: "users", label: "Manage Users", icon: UserCog });
     items.push({ key: "settings", label: "Settings", icon: SettingsIcon });
@@ -1826,6 +1916,7 @@ export default function App() {
     users: <ManageUsersPage goto={goto} session={session} />,
     moniepointLog: <MoniepointLogPage goto={goto} />,
     notifications: <NotificationsPage data={data} goto={goto} />,
+    insights: <BusinessIntelligencePage data={data} goto={goto} />,
     more: <MorePage session={session} data={data} goto={goto} onLogout={handleLogout} />,
   };
 
