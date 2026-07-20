@@ -30,7 +30,16 @@ const FONT = "'Inter', -apple-system, sans-serif";
 const storage = {
   async get(key) {
     const { data, error } = await supabase.from("erp_store").select("value").eq("id", key).maybeSingle();
-    if (error || !data) throw new Error("not found");
+    if (error) {
+      const err = new Error(error.message || "Couldn't load your data.");
+      err.code = "QUERY_ERROR";
+      throw err;
+    }
+    if (!data) {
+      const err = new Error("not found");
+      err.code = "NOT_FOUND";
+      throw err;
+    }
     return { key, value: data.value };
   },
   async set(key, value) {
@@ -1940,6 +1949,8 @@ export default function App() {
   const [data, setData] = useState(null);
   const [page, setPage] = useState("dashboard");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [retryTick, setRetryTick] = useState(0);
   const [saveError, setSaveError] = useState(false);
 
   // Restore session on load/refresh, and react to sign-outs from elsewhere (e.g. token expiry)
@@ -1970,20 +1981,34 @@ export default function App() {
     return () => { cancelled = true; listener.subscription.unsubscribe(); };
   }, []);
 
+  // Only fetch business data once we know auth is settled and someone is
+  // actually signed in — fetching earlier could hit the row before Supabase
+  // has attached the auth token, get denied by RLS, and wrongly look "empty".
   useEffect(() => {
+    if (!authChecked || !session) return;
     let cancelled = false;
+    setLoading(true);
     (async () => {
       try {
         const res = await storage.get(STORAGE_KEY, true);
-        if (!cancelled) setData(res ? JSON.parse(res.value) : DEFAULT_DATA);
+        if (!cancelled) { setData(JSON.parse(res.value)); setLoadError(""); }
       } catch (e) {
-        if (!cancelled) setData(DEFAULT_DATA);
+        if (cancelled) return;
+        if (e.code === "NOT_FOUND") {
+          // Genuinely nothing saved yet (brand new business) — safe to start fresh.
+          setData(DEFAULT_DATA);
+          setLoadError("");
+        } else {
+          // A real fetch/auth error — do NOT fall back to empty data, since that
+          // could later get saved and wipe everyone's real tanks/sales history.
+          setLoadError(e.message || "Couldn't load your data. Check your connection and try again.");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [authChecked, session, retryTick]);
 
   // Live sync: pick up changes saved by other users/devices without a refresh
   useEffect(() => {
@@ -2026,7 +2051,7 @@ export default function App() {
   const phoneFrame = { width: 393, minHeight: 852, background: "#fff", borderRadius: 44, overflow: "hidden", boxShadow: "0 24px 70px rgba(17,24,39,0.22)", border: "8px solid #111827", display: "flex", flexDirection: "column", position: "relative" };
   const outer = { minHeight: "100vh", background: C.bgAlt, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "24px 12px", fontFamily: FONT };
 
-  if (loading || !data || !authChecked) {
+  if (!authChecked) {
     return (
       <div style={outer}>
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'); *{box-sizing:border-box;}`}</style>
@@ -2040,6 +2065,29 @@ export default function App() {
       <div style={outer}>
         <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'); *{box-sizing:border-box;}`}</style>
         <div style={phoneFrame}><StatusBar /><LoginScreen onAuthed={setSession} /></div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={outer}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'); *{box-sizing:border-box;}`}</style>
+        <div style={{ ...phoneFrame, alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center", gap: 14 }}>
+          <AlertTriangle size={32} color={C.alert} />
+          <div style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>Couldn't load your data</div>
+          <div style={{ fontSize: 12.5, color: C.sub }}>{loadError}</div>
+          <Button onClick={() => setRetryTick((t) => t + 1)}>Try Again</Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading || !data) {
+    return (
+      <div style={outer}>
+        <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap'); *{box-sizing:border-box;}`}</style>
+        <div style={{ ...phoneFrame, alignItems: "center", justifyContent: "center", color: C.sub }}>Loading ERP...</div>
       </div>
     );
   }
