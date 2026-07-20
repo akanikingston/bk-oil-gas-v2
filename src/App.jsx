@@ -3,7 +3,7 @@ import {
   Flame, LayoutDashboard, FileBarChart2, Clock, MoreHorizontal, Bell, ChevronLeft,
   Wallet, Receipt, PackageMinus, Fuel, Lock, LogOut, Download, ChevronDown, ChevronUp,
   Users, Truck, Settings as SettingsIcon, ShieldAlert, AlertTriangle, CheckCircle2,
-  DollarSign, TrendingUp, Archive, UserCog, Plus, Printer, FileSpreadsheet,
+  DollarSign, TrendingUp, Archive, UserCog, Plus, Printer, FileSpreadsheet, Sparkles,
 } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
@@ -190,6 +190,38 @@ function pctChange(current, previous) {
   return ((current - previous) / Math.abs(previous)) * 100;
 }
 
+// Builds a compact data snapshot to send to the AI Copilot — enough for it
+// to answer real questions, without shipping the entire raw database.
+function buildAICopilotContext(data) {
+  const activeTank = data.tanks.find((t) => t.status === "ACTIVE");
+  const closedTanks = data.tanks.filter((t) => t.status === "CLOSED");
+  const thisMonthKey = monthKeyOf(todayStr());
+  const lastMonthKey = shiftMonthKey(thisMonthKey, -1);
+
+  return {
+    businessName: data.settings.businessName,
+    today: todayStr(),
+    activeTank: activeTank ? (() => {
+      const m = tankMetrics(activeTank);
+      return {
+        tankNo: activeTank.tankNo, startDate: activeTank.startDate,
+        purchasedKg: m.totalPurchasedKg, remainingKg: m.remainingStock,
+        totalKgSold: m.totalKgSold, totalSalesAmount: m.totalSalesAmount,
+        totalExpenses: m.totalExpenses, cash: sum(activeTank.dailySales, d => d.cash),
+        pos: sum(activeTank.dailySales, d => d.pos),
+        last14DailySales: m.dailyRows.slice(-14).map(r => ({ date: r.date, kgSold: r.kgSoldDay, revenue: r.salesAmountDay, cash: r.cash, pos: r.pos })),
+      };
+    })() : null,
+    thisMonth: { label: monthLabel(thisMonthKey), ...monthlyTotals(data, thisMonthKey) },
+    lastMonth: { label: monthLabel(lastMonthKey), ...monthlyTotals(data, lastMonthKey) },
+    closedTanksSummary: closedTanks.slice(-10).map(t => ({
+      tankNo: t.tankNo, startDate: t.startDate, endDate: t.endDate,
+      netProfit: t.closure.netProfit, varianceType: t.closure.varianceType, varianceKg: t.closure.variance,
+    })),
+    activeNotifications: getNotifications(data).map(n => ({ title: n.title, message: n.message })),
+  };
+}
+
 /* ---------------------------------------------------------------------- */
 /* UI primitives                                                           */
 /* ---------------------------------------------------------------------- */
@@ -304,9 +336,15 @@ function ListTable({ columns, rows, empty }) {
 
 /* Phone chrome */
 function StatusBar() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const time = now.toLocaleTimeString("en-NG", { timeZone: "Africa/Lagos", hour: "2-digit", minute: "2-digit" });
   return (
     <div style={{ height: 44, display: "flex", alignItems: "flex-end", justifyContent: "space-between", padding: "0 22px 6px", fontSize: 13, fontWeight: 600, color: C.text }}>
-      <span>9:41</span>
+      <span>{time} WAT</span>
       <span style={{ fontSize: 11, color: C.sub }}>●●●● 5G 🔋</span>
     </div>
   );
@@ -486,8 +524,7 @@ function CashierDashboard({ data, session, goto }) {
 
       {!activeTank && (
         <Card style={{ marginBottom: 14, background: C.primarySoft, border: "none" }}>
-          <div style={{ fontSize: 13, color: C.text, marginBottom: 10 }}>No active tank. Record a purchase to start one.</div>
-          <Button onClick={() => goto("purchase")}><Plus size={15} /> Record LPG Purchase</Button>
+          <div style={{ fontSize: 13, color: C.text }}>No active tank. Ask your Manager or Owner to record a purchase to start one.</div>
         </Card>
       )}
 
@@ -578,6 +615,12 @@ function ManagerDashboard({ data, session, goto }) {
         <NotificationBell data={data} goto={goto} />
       </div>
 
+      {!activeTank && (
+        <Card style={{ marginBottom: 14, background: C.primarySoft, border: "none" }}>
+          <div style={{ fontSize: 13, color: C.text }}>No active tank right now. Ask your Manager or Owner to record an LPG purchase to start one.</div>
+        </Card>
+      )}
+
       {activeTank && (
         <>
           <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
@@ -638,8 +681,10 @@ function ManagerDashboard({ data, session, goto }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <QuickAction icon={Wallet} label="Daily Sales" tone="success" onClick={() => goto("dailySales")} />
         <QuickAction icon={Fuel} label="Active Tank" tone="primary" onClick={() => goto("activeTank")} />
+        <QuickAction icon={Plus} label="LPG Purchase" tone="success" onClick={() => goto("purchase")} />
         <QuickAction icon={FileBarChart2} label="Reports" tone="warn" onClick={() => goto("reports")} />
         <QuickAction icon={ShieldAlert} label="Audit" tone="alert" onClick={() => goto("audit")} />
+        <QuickAction icon={Sparkles} label="AI Copilot" tone="primary" onClick={() => goto("aiCopilot")} />
       </div>
     </div>
   );
@@ -713,8 +758,10 @@ function OwnerDashboard({ data, session, goto }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <QuickAction icon={FileBarChart2} label="Reports" tone="success" onClick={() => goto("reports")} />
         <QuickAction icon={Archive} label="Tanks" tone="primary" onClick={() => goto("history")} />
+        <QuickAction icon={Plus} label="LPG Purchase" tone="success" onClick={() => goto("purchase")} />
         <QuickAction icon={DollarSign} label="Insights" tone="warn" onClick={() => goto("insights")} />
-        <QuickAction icon={UserCog} label="User Management" tone="alert" onClick={() => goto("users")} />
+        <QuickAction icon={Sparkles} label="AI Copilot" tone="alert" onClick={() => goto("aiCopilot")} />
+        <QuickAction icon={UserCog} label="User Management" tone="primary" onClick={() => goto("users")} />
       </div>
     </div>
   );
@@ -1164,11 +1211,21 @@ function ExpensePage({ data, update, log, goto }) {
 /* LPG Purchase — dip-based (opening/closing stock)                       */
 /* ---------------------------------------------------------------------- */
 
-function PurchasePage({ data, update, log, goto }) {
+function PurchasePage({ data, update, log, goto, session }) {
   const activeTank = data.tanks.find((t) => t.status === "ACTIVE");
+
+  if (session.role === "Cashier") {
+    return (
+      <div style={{ padding: "0 16px 16px" }}>
+        <TopBar title="LPG Purchase" onBack={() => goto("dashboard")} />
+        <Card><div style={{ color: C.faint, fontSize: 13, textAlign: "center", padding: "20px 0" }}>Recording purchases is handled by your Manager or Owner.</div></Card>
+      </div>
+    );
+  }
+
+  const nextTankNo = `Tank ${data.tanks.length + 1}`;
   const [date, setDate] = useState(todayStr());
   const [supplier, setSupplier] = useState(data.suppliers[0]?.name || "");
-  const [tankNo, setTankNo] = useState("");
   const [opening, setOpening] = useState(activeTank ? String(tankMetrics(activeTank).remainingStock) : "0");
   const [closing, setClosing] = useState("");
   const [rate, setRate] = useState("");
@@ -1186,8 +1243,8 @@ function PurchasePage({ data, update, log, goto }) {
       log(`Purchase added to Tank ${activeTank.tankNo}: ${kgFmt(qtyKg)} from ${supplier}`);
     } else {
       const id = uid();
-      tanks.push({ id, tankNo: tankNo || `Tank ${data.tanks.length + 1}`, status: "ACTIVE", startDate: date, endDate: null, purchases: [entry], dailySales: [], internalUsage: [], expenses: [], closure: null });
-      log(`New Active Tank ${tankNo || `Tank ${data.tanks.length}`} created from purchase of ${kgFmt(qtyKg)}`);
+      tanks.push({ id, tankNo: nextTankNo, status: "ACTIVE", startDate: date, endDate: null, purchases: [entry], dailySales: [], internalUsage: [], expenses: [], closure: null });
+      log(`New Active Tank ${nextTankNo} created from purchase of ${kgFmt(qtyKg)}`);
     }
     update({ ...data, tanks });
     goto("dashboard");
@@ -1199,12 +1256,17 @@ function PurchasePage({ data, update, log, goto }) {
       <Card>
         <Field label="Purchase Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="Supplier">
-          <Select value={supplier} onChange={(e) => setSupplier(e.target.value)}>
-            <option value="">Select supplier</option>
-            {data.suppliers.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
-          </Select>
+          <Input
+            list="supplier-suggestions"
+            value={supplier}
+            onChange={(e) => setSupplier(e.target.value)}
+            placeholder="Type any supplier name"
+          />
+          <datalist id="supplier-suggestions">
+            {data.suppliers.map((s) => <option key={s.id} value={s.name} />)}
+          </datalist>
         </Field>
-        {!activeTank && <Field label="Tank"><Input value={tankNo} onChange={(e) => setTankNo(e.target.value)} placeholder="Tank 2" /></Field>}
+        {!activeTank && <Field label="Tank"><Input value={nextTankNo} disabled /></Field>}
         {activeTank && <Field label="Tank"><Input value={activeTank.tankNo} disabled /></Field>}
         <Field label="Opening Stock (kg)"><Input type="number" value={opening} onChange={(e) => setOpening(e.target.value)} /></Field>
         <Field label="Closing Stock After Purchase (kg)"><Input type="number" value={closing} onChange={(e) => setClosing(e.target.value)} placeholder="3300" /></Field>
@@ -1507,6 +1569,97 @@ function BusinessIntelligencePage({ data, goto }) {
   );
 }
 
+/* ---------------------------------------------------------------------- */
+/* AI Copilot — Owner/Manager only                                        */
+/* ---------------------------------------------------------------------- */
+
+const AI_QUICK_PROMPTS = [
+  "Give me today's summary",
+  "Write a weekly recap",
+  "Which tank made the most profit?",
+  "Any shortages this month?",
+  "How are we doing vs last month?",
+];
+
+function AICopilotPage({ data, session, goto }) {
+  const [messages, setMessages] = useState([]); // {role, text}
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function ask(question) {
+    if (!question.trim() || busy) return;
+    setError("");
+    setMessages((prev) => [...prev, { role: "user", text: question }]);
+    setInput("");
+    setBusy(true);
+    try {
+      const context = buildAICopilotContext(data);
+      const res = await fetch("/api/ai-copilot", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ question, context, userId: session.id }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Something went wrong.");
+      setMessages((prev) => [...prev, { role: "assistant", text: result.answer }]);
+    } catch (e) {
+      setError(e.message || "Couldn't reach the AI Copilot.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", height: "100%" }}>
+      <TopBar title="AI Copilot" onBack={() => goto("dashboard")} />
+
+      {messages.length === 0 && (
+        <>
+          <Card style={{ marginBottom: 14, background: C.primarySoft, border: "none" }}>
+            <div style={{ fontSize: 12.5, color: C.text, lineHeight: 1.5 }}>
+              Ask about sales, tanks, profit, or shortages — answers are based only on your real data.
+            </div>
+          </Card>
+          <div style={{ fontSize: 12, color: C.sub, fontWeight: 600, marginBottom: 8 }}>Try asking:</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+            {AI_QUICK_PROMPTS.map((p) => (
+              <button key={p} onClick={() => ask(p)} style={{ textAlign: "left", background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, padding: "10px 12px", fontSize: 13, color: C.text, cursor: "pointer" }}>
+                {p}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "85%" }}>
+            <div style={{
+              background: m.role === "user" ? C.primary : C.bgAlt, color: m.role === "user" ? "#fff" : C.text,
+              borderRadius: 14, padding: "10px 14px", fontSize: 13.5, lineHeight: 1.5, whiteSpace: "pre-wrap",
+            }}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        {busy && <div style={{ fontSize: 12.5, color: C.faint, alignSelf: "flex-start" }}>Thinking...</div>}
+        {error && <div style={{ fontSize: 12.5, color: C.alert, background: C.alertSoft, borderRadius: 10, padding: "8px 12px" }}>{error}</div>}
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <Input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") ask(input); }}
+          placeholder="Ask a question..."
+          style={{ flex: 1 }}
+        />
+        <Button onClick={() => ask(input)} disabled={busy || !input.trim()}>Send</Button>
+      </div>
+    </div>
+  );
+}
+
 function NotificationsPage({ data, goto }) {
   const notifications = getNotifications(data);
   return (
@@ -1664,6 +1817,7 @@ function MorePage({ session, data, goto, onLogout }) {
   ];
   if (session.role === "Manager" || session.role === "Owner") {
     items.push({ key: "insights", label: "Business Intelligence", icon: TrendingUp });
+    items.push({ key: "aiCopilot", label: "AI Copilot", icon: Sparkles });
   }
   if (session.role === "Owner") {
     items.push({ key: "users", label: "Manage Users", icon: UserCog });
@@ -1917,6 +2071,7 @@ export default function App() {
     moniepointLog: <MoniepointLogPage goto={goto} />,
     notifications: <NotificationsPage data={data} goto={goto} />,
     insights: <BusinessIntelligencePage data={data} goto={goto} />,
+    aiCopilot: <AICopilotPage data={data} session={session} goto={goto} />,
     more: <MorePage session={session} data={data} goto={goto} onLogout={handleLogout} />,
   };
 
