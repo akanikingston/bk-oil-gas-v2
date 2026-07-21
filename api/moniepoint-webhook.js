@@ -66,7 +66,14 @@ export default async function handler(req, res) {
   // this check if your test transactions don't show up.
   const isSettled = tx.transactionStatus === "APPROVED" || tx.transactionStatus === "SUCCESSFUL" || tx.responseCode === "00";
 
-  if (isSettled) {
+  // Only count actual sales toward the POS total — a card Purchase or a
+  // customer bank Transfer to the POS account are both real gas sales.
+  // A Withdrawal is an agency-banking cash-out service, not a sale, so it
+  // must NOT be added to the day's POS figure.
+  const txType = (tx.transactionType || eventType || "").toUpperCase();
+  const isSalesType = txType.includes("PURCHASE") || txType.includes("TRANSFER");
+
+  if (isSettled && isSalesType) {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
     // NOTE: Moniepoint amounts are commonly in kobo (e.g. 25300 = ₦253.00),
