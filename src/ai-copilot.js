@@ -56,12 +56,20 @@ export default async function handler(req, res) {
   try {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
     const { data: profile, error: profileError } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
-    if (profileError || !profile || (profile.role !== "Owner" && profile.role !== "Manager")) {
+    if (profileError) {
+      res.status(500).json({ error: `Could not verify permissions: ${profileError.message}` });
+      return;
+    }
+    if (!profile) {
+      res.status(403).json({ error: "No profile found for your account. Try logging out and back in." });
+      return;
+    }
+    if (profile.role !== "Owner" && profile.role !== "Manager") {
       res.status(403).json({ error: "AI Copilot is only available to Owners and Managers." });
       return;
     }
   } catch (e) {
-    res.status(500).json({ error: "Could not verify permissions." });
+    res.status(500).json({ error: `Could not verify permissions: ${e.message}` });
     return;
   }
 
@@ -86,7 +94,9 @@ export default async function handler(req, res) {
     if (!response.ok) {
       const errText = await response.text();
       console.error("Anthropic API error:", response.status, errText);
-      res.status(502).json({ error: "AI Copilot couldn't get a response. Please try again." });
+      let detail = errText;
+      try { detail = JSON.parse(errText)?.error?.message || errText; } catch (parseErr) { /* keep raw text */ }
+      res.status(502).json({ error: `AI Copilot got an error from Anthropic (${response.status}): ${detail}` });
       return;
     }
 
@@ -95,6 +105,6 @@ export default async function handler(req, res) {
     res.status(200).json({ answer: answer || "No response generated." });
   } catch (e) {
     console.error("AI Copilot error:", e.message);
-    res.status(500).json({ error: "Something went wrong reaching the AI Copilot." });
+    res.status(500).json({ error: `Something went wrong reaching the AI Copilot: ${e.message}` });
   }
 }
