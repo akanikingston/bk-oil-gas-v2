@@ -725,6 +725,8 @@ function MiniLineChart({ points, color = C.success, height = 140 }) {
 function OwnerDashboard({ data, session, goto }) {
   const closed = data.tanks.filter((t) => t.status === "CLOSED");
   const active = data.tanks.filter((t) => t.status === "ACTIVE");
+  const activeTank = active[0];
+  const activeM = activeTank ? tankMetrics(activeTank) : null;
   const totalRevenue = sum(closed, (t) => tankMetrics(t).totalSalesAmount) + sum(active, (t) => tankMetrics(t).totalSalesAmount);
   const netProfit = sum(closed, (t) => tankMetrics(t).netProfit);
   const totalKgSold = sum(data.tanks, (t) => tankMetrics(t).totalKgSold);
@@ -756,6 +758,25 @@ function OwnerDashboard({ data, session, goto }) {
         <StatTile label="Total KG Sold" value={kgFmt(totalKgSold)} tone="warn" icon={Fuel} />
         <StatTile label="Active Tanks" value={active.length} tone="neutral" icon={Archive} />
       </div>
+
+      {activeTank && activeM && (
+        <Card style={{ marginBottom: 16 }} onClick={() => goto("activeTank")}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{activeTank.tankNo} — Live Performance</div>
+            <Badge tone="success">ACTIVE</Badge>
+          </div>
+          <div style={{ fontSize: 11, color: C.sub, marginBottom: 10 }}>Building up day by day since {fmtDate(activeTank.startDate)} — finalizes when the tank is closed</div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+            <StatTile label="KG Sold So Far" value={kgFmt(activeM.totalKgSold)} tone="primary" />
+            <StatTile label="Revenue So Far" value={currency(activeM.totalSalesAmount)} tone="success" />
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <StatTile label="Estimated Profit" value={currency(activeM.netProfit)} tone="warn" />
+            <StatTile label="Days Active" value={activeM.dailyRows.length} tone="neutral" />
+          </div>
+          <div style={{ fontSize: 11.5, color: C.primary, marginTop: 10, textAlign: "center" }}>View full Active Tank →</div>
+        </Card>
+      )}
 
       <Card style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 6 }}>Revenue Overview</div>
@@ -928,11 +949,33 @@ function DailySalesPage({ data, update, log, goto }) {
 
   function submit() {
     const entry = { id: uid(), date, p1o: Number(p1o) || 0, p1c: Number(p1c) || 0, p2o: Number(p2o) || 0, p2c: Number(p2c) || 0, price: Number(price) || 0, cash: Number(cash) || 0, pos: Number(pos) || 0 };
+    const newDailySales = [...activeTank.dailySales.filter((d) => d.date !== date), entry];
+    const newInternalUsage = [...activeTank.internalUsage, ...pendingUsage];
+    const newExpenses = [...activeTank.expenses, ...pendingExpenses];
+
+    // If more has now been sold than was ever purchased for this tank, the
+    // difference is genuine extra stock in the tank (e.g. supplier topped it
+    // up) — record it as a zero-cost "Overage" purchase so remaining stock
+    // never goes negative, instead of losing track of where the gas came from.
+    const newTotalKgSold = sum(newDailySales, (d) => (d.p1c - d.p1o) + (d.p2c - d.p2o));
+    const existingPurchasedKg = sum(activeTank.purchases, (p) => p.qtyKg);
+    let newPurchases = activeTank.purchases;
+    if (newTotalKgSold > existingPurchasedKg) {
+      const overageKg = newTotalKgSold - existingPurchasedKg;
+      newPurchases = [...activeTank.purchases, {
+        id: uid(), date, supplier: "Overage (Auto-detected)",
+        openingStock: 0, closingStockAfter: 0, qtyKg: overageKg, rate: 0, amount: 0,
+        invoiceNo: "", note: "Auto-added: more was sold than the recorded purchases account for.",
+      }];
+      log(`Overage detected on ${date}: ${kgFmt(overageKg)} more sold than purchased — added to Tank ${activeTank.tankNo} stock automatically.`);
+    }
+
     const tanks = data.tanks.map((t) => t.id === activeTank.id ? {
       ...t,
-      dailySales: [...t.dailySales.filter((d) => d.date !== date), entry],
-      expenses: [...t.expenses, ...pendingExpenses],
-      internalUsage: [...t.internalUsage, ...pendingUsage],
+      dailySales: newDailySales,
+      expenses: newExpenses,
+      internalUsage: newInternalUsage,
+      purchases: newPurchases,
     } : t);
     update({ ...data, tanks });
     log(`Daily sales recorded for ${date}: ${kgFmt(totalKg)} sold, ${currency(realized)} realized, ${pendingExpenses.length} expense(s), ${pendingUsage.length} usage entr${pendingUsage.length === 1 ? "y" : "ies"}`);
