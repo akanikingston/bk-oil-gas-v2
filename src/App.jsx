@@ -199,6 +199,35 @@ function pctChange(current, previous) {
   return ((current - previous) / Math.abs(previous)) * 100;
 }
 
+// Calls one of our serverless functions and safely handles every failure
+// mode: network errors, non-JSON responses (e.g. Vercel's own HTML error
+// pages), and structured { error: "..." } responses — so the UI always gets
+// a clear message instead of crashing on "Unexpected token" JSON parse errors.
+async function safeFetchJson(url, options) {
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (networkErr) {
+    throw new Error("Network error — check your connection and try again.");
+  }
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    let snippet = "";
+    try { snippet = (await res.text()).slice(0, 140); } catch (readErr) { /* ignore */ }
+    throw new Error(`Server returned an unexpected response (status ${res.status}). ${snippet}`.trim());
+  }
+  let json;
+  try {
+    json = await res.json();
+  } catch (parseErr) {
+    throw new Error("Couldn't read the server's response. Please try again.");
+  }
+  if (!res.ok) {
+    throw new Error(json.error || `Request failed (status ${res.status}).`);
+  }
+  return json;
+}
+
 // Builds a compact data snapshot to send to the AI Copilot — enough for it
 // to answer real questions, without shipping the entire raw database.
 function buildAICopilotContext(data) {
@@ -439,9 +468,7 @@ function LoginScreen({ onAuthed }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "40px 24px", background: "#fff" }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, marginBottom: 20 }}>
-        <div style={{ width: 64, height: 64, borderRadius: 20, background: C.primarySoft, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}>
-          <Flame size={32} color={C.primary} strokeWidth={2} />
-        </div>
+        <img src="/logo.png" alt="BK Oil & Gas" style={{ width: 68, height: 68, borderRadius: 20, objectFit: "cover", marginBottom: 8 }} />
         <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>BK OIL &amp; GAS</div>
         <div style={{ fontSize: 12, color: C.sub }}>ERP SYSTEM</div>
       </div>
@@ -1647,13 +1674,11 @@ function AICopilotPage({ data, session, goto }) {
     setBusy(true);
     try {
       const context = buildAICopilotContext(data);
-      const res = await fetch("/api/ai-copilot", {
+      const result = await safeFetchJson("/api/ai-copilot", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ question, context, userId: session.id }),
       });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Something went wrong.");
       setMessages((prev) => [...prev, { role: "assistant", text: result.answer }]);
     } catch (e) {
       setError(e.message || "Couldn't reach the AI Copilot.");
