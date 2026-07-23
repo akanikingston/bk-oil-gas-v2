@@ -11,16 +11,32 @@ import { supabase } from "./supabaseClient.js";
 /* Design tokens (from provided mockup)                                    */
 /* ---------------------------------------------------------------------- */
 
-const C = {
+const LIGHT_THEME = {
   primary: "#2563EB", primaryDark: "#1D4ED8", primarySoft: "#EFF4FF",
   success: "#16A34A", successSoft: "#EAF7ED",
   alert: "#DC2626", alertSoft: "#FDECEC",
   warn: "#D97706", warnSoft: "#FEF3E0",
   text: "#1F2937", sub: "#6B7280", faint: "#9CA3AF",
   border: "#E5E7EB", bg: "#FFFFFF", bgAlt: "#F3F4F6",
+  shadow: "0 2px 10px rgba(17,24,39,0.06)",
 };
+const DARK_THEME = {
+  primary: "#3B82F6", primaryDark: "#60A5FA", primarySoft: "#1E293B",
+  success: "#22C55E", successSoft: "#14291D",
+  alert: "#F87171", alertSoft: "#3A1D1D",
+  warn: "#FBBF24", warnSoft: "#3A2E12",
+  text: "#F3F4F6", sub: "#9CA3AF", faint: "#6B7280",
+  border: "#2A2D34", bg: "#181B20", bgAlt: "#22262D",
+  shadow: "0 2px 10px rgba(0,0,0,0.35)",
+};
+// C is mutated in place (not reassigned) so every component reading C.xxx at
+// render time automatically picks up the current theme without needing
+// context or prop-drilling through the whole tree.
+const C = { ...LIGHT_THEME };
+function applyTheme(mode) {
+  Object.assign(C, mode === "dark" ? DARK_THEME : LIGHT_THEME);
+}
 const RADIUS = 16;
-const SHADOW = "0 2px 10px rgba(17,24,39,0.06)";
 const FONT = "'Inter', -apple-system, sans-serif";
 
 /* ---------------------------------------------------------------------- */
@@ -304,7 +320,7 @@ function toneColors(tone) {
 }
 
 function Card({ children, style }) {
-  return <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: RADIUS, padding: 12, boxShadow: SHADOW, ...style }}>{children}</div>;
+  return <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: RADIUS, padding: 12, boxShadow: C.shadow, ...style }}>{children}</div>;
 }
 function Field({ label, children }) {
   return <div style={{ marginBottom: 12 }}><div style={{ fontSize: 12, color: C.sub, marginBottom: 5, fontWeight: 500 }}>{label}</div>{children}</div>;
@@ -320,7 +336,7 @@ function Button({ children, variant = "primary", full, ...props }) {
     primary: { background: C.primary, color: "#fff" },
     success: { background: C.success, color: "#fff" },
     alert: { background: C.alert, color: "#fff" },
-    outline: { background: "#fff", color: C.text, border: `1px solid ${C.border}` },
+    outline: { background: C.bg, color: C.text, border: `1px solid ${C.border}` },
     ghost: { background: "transparent", color: C.primary, border: "none" },
   };
   return (
@@ -428,7 +444,7 @@ function TopBar({ title, onBack, right }) {
 }
 function BottomNav({ items, active, onChange }) {
   return (
-    <div style={{ display: "flex", borderTop: `1px solid ${C.border}`, background: "#fff", padding: "8px 4px 10px" }}>
+    <div style={{ display: "flex", borderTop: `1px solid ${C.border}`, background: C.bg, padding: "8px 4px 10px" }}>
       {items.map((it) => {
         const Icon = it.icon;
         const isActive = active === it.key;
@@ -494,7 +510,7 @@ function LoginScreen({ onAuthed }) {
   }
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "40px 24px", background: "#fff" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "40px 24px", background: C.bg }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, marginBottom: 20 }}>
         <img src="/logo.png" alt="BK Oil & Gas" style={{ width: 68, height: 68, borderRadius: 20, objectFit: "cover", marginBottom: 8 }} />
         <div style={{ fontSize: 20, fontWeight: 700, color: C.text }}>BK OIL &amp; GAS</div>
@@ -593,7 +609,7 @@ function CashierDashboard({ data, session, goto }) {
       )}
 
       {activeTank && (
-        <div style={{ background: C.success, borderRadius: RADIUS, padding: 16, marginBottom: 14, boxShadow: SHADOW }}>
+        <div style={{ background: C.success, borderRadius: RADIUS, padding: 16, marginBottom: 14, boxShadow: C.shadow }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 12 }}>Today's Sales</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div style={{ background: "rgba(255,255,255,0.15)", borderRadius: 10, padding: "10px 12px" }}>
@@ -1461,7 +1477,7 @@ function EndTankPage({ data, update, log, goto }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: C.alertSoft, padding: "40px 22px" }}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: 14 }}>
-        <div style={{ width: 68, height: 68, borderRadius: "50%", background: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: 68, height: 68, borderRadius: "50%", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <AlertTriangle size={32} color={C.alert} />
         </div>
         <div style={{ fontSize: 18, fontWeight: 700, color: C.alert }}>END TANK CONFIRMATION</div>
@@ -1746,7 +1762,7 @@ function AICopilotPage({ data, session, goto }) {
           <div style={{ fontSize: 12, color: C.sub, fontWeight: 600, marginBottom: 8 }}>Try asking:</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
             {AI_QUICK_PROMPTS.map((p) => (
-              <button key={p} onClick={() => ask(p)} style={{ textAlign: "left", background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, padding: "10px 12px", fontSize: 13, color: C.text, cursor: "pointer" }}>
+              <button key={p} onClick={() => ask(p)} style={{ textAlign: "left", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, padding: "10px 12px", fontSize: 13, color: C.text, cursor: "pointer" }}>
                 {p}
               </button>
             ))}
@@ -1910,13 +1926,21 @@ function DirectoryPage({ title, items, addItem, goto }) {
   );
 }
 
-function SettingsPage({ data, update, log, goto }) {
+function SettingsPage({ data, update, log, goto, themeMode, setThemeMode }) {
   const [name, setName] = useState(data.settings.businessName);
   const [price, setPrice] = useState(data.settings.defaultPricePerKg);
   function save() { update({ ...data, settings: { ...data.settings, businessName: name, defaultPricePerKg: Number(price) || 0 } }); log("Settings updated"); }
   return (
     <div style={{ padding: "0 16px 16px" }}>
       <TopBar title="Settings" onBack={() => goto("more")} />
+      <Card style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Appearance</div>
+        <Segmented
+          options={[{ label: "Light", value: "light" }, { label: "Dark", value: "dark" }]}
+          value={themeMode} onChange={setThemeMode}
+        />
+        <div style={{ fontSize: 11, color: C.faint, marginTop: -6 }}>Saved to this device — you'll see the same theme next time you open the app here.</div>
+      </Card>
       <Card>
         <Field label="Business name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="Default selling price / kg (₦)"><Input type="number" value={price} onChange={(e) => setPrice(e.target.value)} /></Field>
@@ -1956,7 +1980,7 @@ function MorePage({ session, data, goto, onLogout }) {
       {items.map((it) => {
         const Icon = it.icon;
         return (
-          <button key={it.key} onClick={() => goto(it.key)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 12, padding: "12px 14px", marginBottom: 8, cursor: "pointer" }}>
+          <button key={it.key} onClick={() => goto(it.key)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, padding: "12px 14px", marginBottom: 8, cursor: "pointer" }}>
             <Icon size={17} color={C.primary} /><span style={{ fontSize: 13.5, color: C.text, fontWeight: 500 }}>{it.label}</span>
           </button>
         );
@@ -2066,6 +2090,15 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [retryTick, setRetryTick] = useState(0);
   const [saveError, setSaveError] = useState(false);
+  const [themeMode, setThemeModeState] = useState(() => {
+    try { return window.localStorage.getItem("bk-theme") || "light"; } catch (e) { return "light"; }
+  });
+  // Apply immediately (before first paint of this render) so there's no flash of the old theme.
+  applyTheme(themeMode);
+  function setThemeMode(mode) {
+    setThemeModeState(mode);
+    try { window.localStorage.setItem("bk-theme", mode); } catch (e) { /* ignore storage errors */ }
+  }
 
   // Restore session on load/refresh, and react to sign-outs from elsewhere (e.g. token expiry)
   useEffect(() => {
@@ -2162,7 +2195,7 @@ export default function App() {
     setPage("dashboard");
   }
 
-  const phoneFrame = { width: 393, minHeight: 852, background: "#fff", borderRadius: 44, overflow: "hidden", boxShadow: "0 24px 70px rgba(17,24,39,0.22)", border: "8px solid #111827", display: "flex", flexDirection: "column", position: "relative" };
+  const phoneFrame = { width: 393, minHeight: 852, background: C.bg, borderRadius: 44, overflow: "hidden", boxShadow: "0 24px 70px rgba(17,24,39,0.22)", border: "8px solid #111827", display: "flex", flexDirection: "column", position: "relative" };
   const outer = { minHeight: "100vh", background: C.bgAlt, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "24px 12px", fontFamily: FONT };
 
   if (!authChecked) {
@@ -2207,7 +2240,7 @@ export default function App() {
   }
 
   const nav = NAV_BY_ROLE[session.role];
-  const pageProps = { data, update, log, session, goto };
+  const pageProps = { data, update, log, session, goto, themeMode, setThemeMode };
 
   const homeByRole = {
     Cashier: <CashierDashboard {...pageProps} />,
