@@ -194,6 +194,34 @@ function monthlyTotals(data, monthKey) {
   });
   return { kg, revenue, expenses, netProfit: revenue - expenses, cash, pos, internalUsageKg };
 }
+function weekKeyOf(dateStr) {
+  const d = new Date((dateStr || todayStr()) + "T00:00:00");
+  const day = (d.getDay() + 6) % 7; // Monday = 0
+  d.setDate(d.getDate() - day);
+  return d.toISOString().slice(0, 10); // the Monday that starts this week
+}
+function weekLabel(weekStartKey) {
+  const start = new Date(weekStartKey + "T00:00:00");
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const fmt = (dt) => dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  return `${fmt(start)} – ${fmt(end)}`;
+}
+// Groups a tank's daily rows into Weekly or Monthly rollups, built
+// automatically from whatever daily sales exist so far.
+function groupDailyRows(dailyRows, keyFn, labelFn) {
+  const map = {};
+  dailyRows.forEach((r) => {
+    const key = keyFn(r.date);
+    if (!map[key]) map[key] = { key, label: labelFn(key), kg: 0, revenue: 0, cash: 0, pos: 0, days: 0 };
+    map[key].kg += r.kgSoldDay;
+    map[key].revenue += r.salesAmountDay;
+    map[key].cash += r.cash;
+    map[key].pos += r.pos;
+    map[key].days += 1;
+  });
+  return Object.values(map).sort((a, b) => (a.key < b.key ? 1 : -1));
+}
 function pctChange(current, previous) {
   if (previous === 0) return current === 0 ? 0 : 100;
   return ((current - previous) / Math.abs(previous)) * 100;
@@ -843,11 +871,31 @@ function NoActiveTankNotice({ title, goto }) {
 
 function ActiveTankPage({ data, goto }) {
   const activeTank = data.tanks.find((t) => t.status === "ACTIVE");
+  const [period, setPeriod] = useState("daily");
   if (!activeTank) return <NoActiveTankNotice title="Active Tank" goto={goto} />;
   const m = tankMetrics(activeTank);
   const totalCash = sum(activeTank.dailySales, (d) => d.cash);
   const totalPos = sum(activeTank.dailySales, (d) => d.pos);
-  const rows = m.dailyRows.slice().reverse();
+  const dailyRows = m.dailyRows.slice().reverse();
+  const weeklyRows = groupDailyRows(m.dailyRows, weekKeyOf, weekLabel);
+  const monthlyRows = groupDailyRows(m.dailyRows, monthKeyOf, monthLabel);
+
+  const periodRows = { daily: dailyRows, weekly: weeklyRows, monthly: monthlyRows }[period];
+  const periodColumns = period === "daily"
+    ? [
+        { key: "date", label: "Date" },
+        { key: "kg", label: "KG Sold", render: (r) => kgFmt(r.kgSoldDay) },
+        { key: "cash", label: "Cash", render: (r) => currency(r.cash) },
+        { key: "pos", label: "POS", render: (r) => currency(r.pos) },
+        { key: "revenue", label: "Revenue", render: (r) => currency(r.salesAmountDay) },
+      ]
+    : [
+        { key: "label", label: period === "weekly" ? "Week" : "Month" },
+        { key: "kg", label: "KG Sold", render: (r) => kgFmt(r.kg) },
+        { key: "cash", label: "Cash", render: (r) => currency(r.cash) },
+        { key: "pos", label: "POS", render: (r) => currency(r.pos) },
+        { key: "revenue", label: "Revenue", render: (r) => currency(r.revenue) },
+      ];
 
   return (
     <div style={{ padding: "0 16px 16px" }}>
@@ -862,17 +910,15 @@ function ActiveTankPage({ data, goto }) {
         <StatTile label="POS" value={currency(totalPos)} tone="primary" icon={Wallet} />
       </div>
 
-      <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Daily Sales Log</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>Sales Review — auto-calculated from every day recorded</div>
+      <Segmented
+        options={[{ label: "Daily", value: "daily" }, { label: "Weekly", value: "weekly" }, { label: "Monthly", value: "monthly" }]}
+        value={period} onChange={setPeriod}
+      />
       <Card style={{ marginBottom: 16 }}>
         <ListTable
-          columns={[
-            { key: "date", label: "Date" },
-            { key: "kg", label: "KG Sold", render: (r) => kgFmt(r.kgSoldDay) },
-            { key: "cash", label: "Cash", render: (r) => currency(r.cash) },
-            { key: "pos", label: "POS", render: (r) => currency(r.pos) },
-            { key: "revenue", label: "Revenue", render: (r) => currency(r.salesAmountDay) },
-          ]}
-          rows={rows}
+          columns={periodColumns}
+          rows={periodRows}
           empty="No daily sales recorded yet."
         />
       </Card>
