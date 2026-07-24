@@ -1537,26 +1537,38 @@ function HistoryPage({ data, goto }) {
 function TankDetail({ tank, onBack }) {
   const m = tankMetrics(tank);
   const c = tank.closure;
+  const avgSellingRate = m.paidKg > 0 ? m.totalSalesAmount / m.paidKg : 0;
+  const amountRealized = m.totalSalesAmount - m.totalExpenses;
   return (
     <div style={{ padding: "0 16px 16px" }}>
       <TopBar title={`${tank.tankNo}`} onBack={onBack} right={c ? <Badge tone="neutral">CLOSED</Badge> : <Badge tone="success">ACTIVE</Badge>} />
       <Card style={{ marginBottom: 14 }}>
-        <Row label="Tank Number" value={tank.tankNo} />
+        <div style={{ fontSize: 11, color: C.faint, fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Purchase Summary</div>
         <Row label="Supplier" value={tank.purchases[0]?.supplier || "—"} />
         <Row label="Purchase Date" value={fmtDate(tank.purchases[0]?.date || tank.startDate)} />
+        <Row label="Purchase Rate per KG" value={currency(tank.purchases[0]?.rate || 0) + "/kg"} />
+        <Row label="Total KG Purchased" value={kgFmt(m.totalPurchasedKg)} />
+        <Row label="Purchase Amount" value={currency(m.totalCost)} />
+
+        <div style={{ fontSize: 11, color: C.faint, fontWeight: 700, textTransform: "uppercase", margin: "14px 0 4px" }}>Sales Summary</div>
         <Row label="Date Started Selling" value={fmtDate(tank.startDate)} />
         {tank.endDate && <Row label="Date Finished Selling" value={fmtDate(tank.endDate)} />}
-        <Row label="Quantity Purchased" value={kgFmt(m.totalPurchasedKg)} />
-        <Row label="Purchase Rate" value={currency(tank.purchases[0]?.rate || 0) + "/kg"} />
-        <Row label="Purchase Amount" value={currency(m.totalCost)} />
-        <Row label="Total Kg Sold" value={kgFmt(m.totalKgSold)} />
+        <Row label="Total KG Sold" value={kgFmt(m.totalKgSold)} />
         <Row label="Paid KG (After Usage)" value={kgFmt(m.paidKg)} />
+        <Row label="Average Selling Rate (Weighted)" value={currency(avgSellingRate) + "/kg"} />
+        <Row label="Gross Sales Amount" value={currency(m.totalSalesAmount)} strong />
         <Row label="Generator Usage" value={kgFmt(sum(tank.internalUsage.filter(u => u.type === "Generator"), u => u.kg))} />
         <Row label="Director / Mgmt Usage" value={kgFmt(sum(tank.internalUsage.filter(u => u.type === "Management"), u => u.kg))} />
         <Row label="Other Free Issues" value={kgFmt(sum(tank.internalUsage.filter(u => u.type === "Free Issue"), u => u.kg))} />
+
+        <div style={{ fontSize: 11, color: C.faint, fontWeight: 700, textTransform: "uppercase", margin: "14px 0 4px" }}>Expense Summary</div>
+        <Row label="Total Expenses (incl. Moniepoint debits)" value={currency(m.totalExpenses)} />
+
+        <div style={{ fontSize: 11, color: C.faint, fontWeight: 700, textTransform: "uppercase", margin: "14px 0 4px" }}>Financial Results</div>
+        <Row label="Amount Realized (Gross Sales − Expenses)" value={currency(amountRealized)} strong />
         {c && <Row label={c.variance < 0 ? "Shortage" : "Overage"} value={kgFmt(Math.abs(c.variance))} strong />}
-        {c && <Row label="Gross Profit" value={currency(c.grossProfit)} strong />}
-        {c && <Row label="Net Profit" value={currency(c.netProfit)} strong />}
+        {c && <Row label="Profit (Gross Sales − Purchase Amount)" value={currency(c.grossProfit)} strong />}
+        {c && <Row label="Net Profit (after Expenses)" value={currency(c.netProfit)} strong />}
       </Card>
       <div style={{ display: "flex", gap: 10 }}>
         <Button variant="outline" full onClick={() => downloadCSV(`${tank.tankNo}-report.csv`, m.dailyRows)}><FileSpreadsheet size={14} /> Export Excel</Button>
